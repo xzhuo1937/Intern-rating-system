@@ -1,0 +1,5 @@
+{
+  "name": "实习生能力雷达",
+  "description": "一个游戏化的实习生绩效评估看板，使用五维雷达图和AI分析。",
+  "requestFramePermissions": []
+}
