@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Trophy, Sparkles, Users, Trash2, Activity, Zap, Calendar, Lock, LogOut, RefreshCw } from 'lucide-react';
+import { Plus, Trophy, Sparkles, Users, Trash2, Activity, Zap, Calendar, Lock, LogOut, RefreshCw, Pencil } from 'lucide-react';
 import { Intern, Evaluation, CriteriaKey, Gender } from './types';
 import { StatsRadar } from './components/StatsRadar';
 import { EvaluationModal } from './components/EvaluationModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AddInternModal } from './components/AddInternModal';
+import { EditInternModal } from './components/EditInternModal';
 import { generateInternSummary } from './services/geminiService';
 
 // Helper to generate Q-style Asian avatars (using Adventurer style with specific seeds/features)
@@ -57,6 +58,7 @@ export default function App() {
   const [isEvalModalOpen, setIsEvalModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   
   // States
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
@@ -127,19 +129,28 @@ export default function App() {
     }));
   };
 
-  const handleAddIntern = (name: string, role: string, gender: Gender) => {
+  const handleAddIntern = (name: string, role: string, gender: Gender, joinDate: string) => {
     const newIntern: Intern = {
       id: Date.now().toString(),
       name,
       role,
       gender,
-      joinDate: new Date().toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }),
+      joinDate: joinDate,
       // Use timestamp + name to create unique seed, append gender specific suffix for manual tuning if needed
       avatarId: `${name}_${Date.now()}`, 
       evaluations: []
     };
     setInterns([...interns, newIntern]);
     setSelectedInternId(newIntern.id);
+  };
+
+  const handleUpdateIntern = (id: string, updates: Partial<Intern>) => {
+    setInterns(prev => prev.map(intern => {
+      if (intern.id === id) {
+        return { ...intern, ...updates };
+      }
+      return intern;
+    }));
   };
 
   const handleGenerateSummary = async () => {
@@ -159,6 +170,22 @@ export default function App() {
       if (selectedInternId === id && newInterns.length > 0) {
         setSelectedInternId(newInterns[0].id);
       }
+    }
+  };
+
+  const handleDeleteEvaluation = (evalId: string) => {
+    if (!selectedIntern || !isAdmin) return;
+    if (window.confirm('确定要删除这条评价吗？')) {
+      setInterns(prev => prev.map(intern => {
+        if (intern.id === selectedInternId) {
+            return {
+                ...intern,
+                evaluations: intern.evaluations.filter(e => e.id !== evalId),
+                aiSummary: undefined // Clear AI summary as data changed
+            };
+        }
+        return intern;
+      }));
     }
   };
 
@@ -235,9 +262,14 @@ export default function App() {
                 </div>
                 
                 <div className="flex-1 min-w-0">
-                  <h3 className={`font-bold truncate text-sm ${isSelected ? 'text-white' : 'text-slate-200'}`}>
-                    {intern.name}
-                  </h3>
+                  <div className="flex justify-between items-center mb-0.5">
+                    <h3 className={`font-bold truncate text-sm ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                        {intern.name}
+                    </h3>
+                    <span className={`text-[10px] font-mono ${isSelected ? 'text-indigo-200' : 'text-slate-500'}`}>
+                        {intern.joinDate}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2 mt-1">
                     <div className="flex-1 h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
                       <div 
@@ -263,9 +295,10 @@ export default function App() {
                 {isAdmin && (
                   <button 
                     onClick={(e) => handleDeleteIntern(intern.id, e)}
-                    className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition"
+                    title="删除成员"
+                    className="absolute right-2 top-8 opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded transition z-10"
                   >
-                    <Trash2 size={14} />
+                    <Trash2 size={12} />
                   </button>
                 )}
               </div>
@@ -287,7 +320,7 @@ export default function App() {
               onClick={() => setIsAdminModalOpen(true)} 
               className="text-xs text-slate-600 hover:text-slate-400 flex items-center gap-1 transition"
             >
-              <Lock size={12} /> 内部入口
+              <Lock size={12} /> 管理员登录
             </button>
           )}
         </div>
@@ -305,7 +338,17 @@ export default function App() {
           <div className="relative z-10 max-w-6xl mx-auto p-6 md:p-10">
             
             {/* Header Card */}
-            <div className="glass-panel rounded-3xl p-6 md:p-8 mb-8 flex flex-col md:flex-row justify-between items-center gap-6 shadow-xl">
+            <div className="glass-panel rounded-3xl p-6 md:p-8 mb-8 flex flex-col md:flex-row justify-between items-center gap-6 shadow-xl relative group/header">
+              {isAdmin && (
+                  <button 
+                    onClick={() => setIsEditModalOpen(true)}
+                    className="absolute top-4 right-4 md:top-6 md:right-6 text-slate-400 hover:text-white hover:bg-white/10 p-2 rounded-full transition opacity-0 group-hover/header:opacity-100"
+                    title="编辑资料"
+                  >
+                    <Pencil size={18} />
+                  </button>
+              )}
+
               <div className="flex items-center gap-6">
                 <div className="relative group">
                     <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full blur opacity-75 group-hover:opacity-100 transition duration-1000"></div>
@@ -316,8 +359,8 @@ export default function App() {
                     {isAdmin && (
                       <button 
                         onClick={handleRegenerateAvatar}
-                        title="切换形象/性别"
-                        className="absolute bottom-0 right-0 bg-slate-800 text-white p-1.5 rounded-full shadow border border-white/20 hover:bg-indigo-600 transition"
+                        title="随机切换形象/性别"
+                        className="absolute bottom-0 right-0 bg-slate-800 text-white p-1.5 rounded-full shadow border border-white/20 hover:bg-indigo-600 transition z-10"
                       >
                         <RefreshCw size={12} />
                       </button>
@@ -416,7 +459,7 @@ export default function App() {
                       <div className="text-slate-500 text-sm text-center py-10">这里空空如也，快来给 TA 提点建议吧~</div>
                     )}
                     {selectedIntern.evaluations.map(ev => (
-                      <div key={ev.id} className="bg-white/5 hover:bg-white/10 transition p-4 rounded-2xl border border-white/5">
+                      <div key={ev.id} className="bg-white/5 hover:bg-white/10 transition p-4 rounded-2xl border border-white/5 relative group">
                         <div className="flex justify-between items-center mb-3">
                           <div className="flex items-center gap-2">
                              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center text-[10px] font-bold text-white">
@@ -444,6 +487,17 @@ export default function App() {
                         <p className="text-slate-300 text-sm bg-black/20 p-3 rounded-xl italic">
                             "{ev.comment || "暂无评论"}"
                         </p>
+
+                        {/* Admin: Delete Evaluation */}
+                        {isAdmin && (
+                          <button 
+                            onClick={() => handleDeleteEvaluation(ev.id)}
+                            title="删除评价"
+                            className="absolute top-2 right-2 p-1.5 bg-slate-800/80 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded-lg opacity-0 group-hover:opacity-100 transition"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -465,12 +519,20 @@ export default function App() {
 
       {/* Modals */}
       {selectedIntern && (
-        <EvaluationModal 
-          isOpen={isEvalModalOpen} 
-          onClose={() => setIsEvalModalOpen(false)} 
-          onSubmit={handleAddEvaluation}
-          internName={selectedIntern.name}
-        />
+        <>
+            <EvaluationModal 
+            isOpen={isEvalModalOpen} 
+            onClose={() => setIsEvalModalOpen(false)} 
+            onSubmit={handleAddEvaluation}
+            internName={selectedIntern.name}
+            />
+            <EditInternModal 
+            isOpen={isEditModalOpen}
+            onClose={() => setIsEditModalOpen(false)}
+            initialData={selectedIntern}
+            onSubmit={handleUpdateIntern}
+            />
+        </>
       )}
 
       <AdminLoginModal 
@@ -484,6 +546,7 @@ export default function App() {
         onClose={() => setIsAddModalOpen(false)} 
         onSubmit={handleAddIntern} 
       />
+
     </div>
   );
 }

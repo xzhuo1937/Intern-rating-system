@@ -15,7 +15,8 @@ export const AdminLoginModal: React.FC<Props> = ({ isOpen, onClose, onLogin }) =
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === 'admin123') {
+    // Changed password to 666
+    if (password === '666') {
       onLogin();
       onClose();
       setPassword('');
@@ -43,7 +44,7 @@ export const AdminLoginModal: React.FC<Props> = ({ isOpen, onClose, onLogin }) =
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="输入密钥 (admin123)"
+              placeholder="请输入管理员密钥"
               className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
               autoFocus
             />

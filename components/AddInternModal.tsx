@@ -5,22 +5,45 @@ import { Gender } from '../types';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (name: string, role: string, gender: Gender) => void;
+  onSubmit: (name: string, role: string, gender: Gender, joinDate: string) => void;
 }
 
 export const AddInternModal: React.FC<Props> = ({ isOpen, onClose, onSubmit }) => {
   const [name, setName] = useState('');
   const [role, setRole] = useState('实习生');
   const [gender, setGender] = useState<Gender>('female');
+  
+  // Default to today's date in YYYY-MM-DD format
+  const [dateInput, setDateInput] = useState(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
 
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (name.trim()) {
-      onSubmit(name, role, gender);
+      // Format date from YYYY-MM-DD to M月D日 for display consistency
+      const [y, m, d] = dateInput.split('-');
+      const formattedDate = `${parseInt(m)}月${parseInt(d)}日`;
+
+      onSubmit(name, role, gender, formattedDate);
+      
+      // Reset fields
       setName('');
       setRole('实习生');
+      
+      // Reset date to today
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      setDateInput(`${year}-${month}-${day}`);
+      
       onClose();
     }
   };
@@ -71,6 +94,17 @@ export const AddInternModal: React.FC<Props> = ({ isOpen, onClose, onSubmit }) =
                     <option value="male">男生</option>
                 </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase mb-1">入职日期</label>
+            <input 
+                type="date"
+                required
+                value={dateInput}
+                onChange={(e) => setDateInput(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none scheme-dark"
+            />
           </div>
 
           <button
