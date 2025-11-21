@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Trophy, Sparkles, Users, Trash2, Activity, Zap, Calendar, Lock, LogOut, RefreshCw, Pencil } from 'lucide-react';
 import { Intern, Evaluation, CriteriaKey, Gender } from './types';
 import { StatsRadar } from './components/StatsRadar';
@@ -50,9 +50,24 @@ const INITIAL_INTERNS: Intern[] = [
   }
 ];
 
+const STORAGE_KEY = 'intern_stats_data_v1';
+
 export default function App() {
-  const [interns, setInterns] = useState<Intern[]>(INITIAL_INTERNS);
-  const [selectedInternId, setSelectedInternId] = useState<string>(INITIAL_INTERNS[0].id);
+  // Initialize interns from local storage or fallback to initial data
+  const [interns, setInterns] = useState<Intern[]>(() => {
+    try {
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      return savedData ? JSON.parse(savedData) : INITIAL_INTERNS;
+    } catch (error) {
+      console.error("Failed to load data from storage", error);
+      return INITIAL_INTERNS;
+    }
+  });
+
+  const [selectedInternId, setSelectedInternId] = useState<string>(() => {
+    // Try to preserve selection or default to first
+    return interns.length > 0 ? interns[0].id : '';
+  });
   
   // Modals
   const [isEvalModalOpen, setIsEvalModalOpen] = useState(false);
@@ -67,6 +82,18 @@ export default function App() {
   const selectedIntern = useMemo(() => 
     interns.find(i => i.id === selectedInternId), 
   [interns, selectedInternId]);
+
+  // Persist data whenever interns state changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(interns));
+  }, [interns]);
+
+  // Ensure selectedInternId is valid (in case data loaded from storage has different IDs or was deleted)
+  useEffect(() => {
+    if (interns.length > 0 && !interns.find(i => i.id === selectedInternId)) {
+      setSelectedInternId(interns[0].id);
+    }
+  }, [interns, selectedInternId]);
 
   // Calculate average scores for the selected intern
   const averageScores: Record<CriteriaKey, number> | null = useMemo(() => {
@@ -95,6 +122,35 @@ export default function App() {
     return averages;
   }, [selectedIntern]);
 
+  // Auto-generate AI summary if missing
+  useEffect(() => {
+    let isMounted = true;
+
+    const autoGenerate = async () => {
+      if (selectedIntern && 
+          !selectedIntern.aiSummary && 
+          selectedIntern.evaluations.length > 0 && 
+          !isGeneratingAI
+      ) {
+        setIsGeneratingAI(true);
+        try {
+          const summary = await generateInternSummary(selectedIntern);
+          if (isMounted) {
+            setInterns(prev => prev.map(i => i.id === selectedIntern.id ? { ...i, aiSummary: summary } : i));
+          }
+        } catch (error) {
+          console.error("Auto-generation failed", error);
+        } finally {
+          if (isMounted) setIsGeneratingAI(false);
+        }
+      }
+    };
+
+    autoGenerate();
+
+    return () => { isMounted = false; };
+  }, [selectedInternId, selectedIntern?.evaluations, selectedIntern?.aiSummary]);
+
   // Calculate global ranking based on total average score
   const rankedInterns = useMemo(() => {
     return [...interns].map(intern => {
@@ -122,7 +178,7 @@ export default function App() {
         return {
           ...intern,
           evaluations: [newEvaluation, ...intern.evaluations],
-          aiSummary: undefined // Clear old summary as data changed
+          aiSummary: undefined // Clear old summary as data changed, triggers useEffect to regenerate
         };
       }
       return intern;
@@ -153,12 +209,17 @@ export default function App() {
     }));
   };
 
-  const handleGenerateSummary = async () => {
+  const handleForceGenerateSummary = async () => {
     if (!selectedIntern) return;
     setIsGeneratingAI(true);
-    const summary = await generateInternSummary(selectedIntern);
-    setInterns(prev => prev.map(i => i.id === selectedIntern.id ? { ...i, aiSummary: summary } : i));
-    setIsGeneratingAI(false);
+    try {
+      const summary = await generateInternSummary(selectedIntern);
+      setInterns(prev => prev.map(i => i.id === selectedIntern.id ? { ...i, aiSummary: summary } : i));
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsGeneratingAI(false);
+    }
   };
 
   const handleDeleteIntern = (id: string, e: React.MouseEvent) => {
@@ -181,7 +242,7 @@ export default function App() {
             return {
                 ...intern,
                 evaluations: intern.evaluations.filter(e => e.id !== evalId),
-                aiSummary: undefined // Clear AI summary as data changed
+                aiSummary: undefined // Clear AI summary to trigger regeneration
             };
         }
         return intern;
@@ -239,280 +300,272 @@ export default function App() {
               <div 
                 key={intern.id}
                 onClick={() => setSelectedInternId(intern.id)}
-                className={`group relative flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border-2 ${
+                className={`relative p-3 rounded-xl cursor-pointer transition-all duration-300 border group ${
                   isSelected 
-                    ? 'bg-white/10 border-indigo-500/50 shadow-lg' 
-                    : 'bg-white/5 border-transparent hover:bg-white/10 hover:scale-[1.02]'
+                    ? 'bg-white/10 border-indigo-500/50 shadow-[0_0_20px_rgba(99,102,241,0.15)]' 
+                    : 'bg-slate-800/30 border-transparent hover:bg-slate-800/60 hover:border-white/5'
                 }`}
               >
-                <div className={`flex items-center justify-center w-7 h-7 rounded-lg font-black text-sm ${
-                   isTop ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-white shadow-yellow-500/50' : 
-                   isBottom ? 'bg-slate-700 text-slate-400' : 'bg-slate-800 text-slate-500'
-                }`}>
-                  {index + 1}
-                </div>
-                
-                <div className="relative">
+                <div className="flex items-center gap-3">
+                  <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-black ${
+                    isTop ? 'bg-yellow-400 text-yellow-900' : 
+                    index === 1 ? 'bg-slate-300 text-slate-900' :
+                    index === 2 ? 'bg-amber-700 text-amber-100' :
+                    'bg-slate-700 text-slate-400'
+                  }`}>
+                    {index + 1}
+                  </div>
+                  
                   <img 
                     src={getAvatarUrl(intern.avatarId)} 
-                    alt="Avatar" 
-                    className="w-12 h-12 rounded-full bg-slate-200 border-2 border-white/20"
+                    alt={intern.name}
+                    className="w-10 h-10 rounded-full bg-indigo-100 border border-white/10"
                   />
-                  {isTop && <div className="absolute -top-2 -right-1 text-lg">👑</div>}
-                </div>
-                
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center mb-0.5">
-                    <h3 className={`font-bold truncate text-sm ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <h3 className={`font-bold truncate ${isSelected ? 'text-white' : 'text-slate-300'}`}>
                         {intern.name}
-                    </h3>
-                    <span className={`text-[10px] font-mono ${isSelected ? 'text-indigo-200' : 'text-slate-500'}`}>
-                        {intern.joinDate}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <div className="flex-1 h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full shadow-sm ${
-                            intern.average >= 8 ? 'bg-gradient-to-r from-green-400 to-emerald-500' : 
-                            intern.average <= 5 ? 'bg-gradient-to-r from-red-500 to-pink-600' : 
-                            'bg-gradient-to-r from-indigo-400 to-blue-500'
-                        }`} 
-                        style={{ width: `${intern.average * 10}%` }}
-                      />
+                      </h3>
+                      <span className="text-[10px] font-medium text-slate-500 flex items-center gap-1">
+                         <Calendar size={10} /> {intern.joinDate}
+                      </span>
                     </div>
-                    <span className={`text-xs font-black ${
-                        intern.average >= 8 ? 'text-green-400' : 
-                        intern.average <= 5 ? 'text-red-400' : 
-                        'text-indigo-400'
-                    }`}>
-                      {intern.average}
-                    </span>
+                    <div className="flex justify-between items-center mt-1">
+                      <span className="text-xs text-slate-500 truncate max-w-[80px]">{intern.role}</span>
+                      <span className={`text-xs font-mono font-bold ${
+                        intern.average >= 8 ? 'text-green-400' : intern.average <= 5 ? 'text-red-400' : 'text-indigo-400'
+                      }`}>
+                        {intern.average}分
+                      </span>
+                    </div>
                   </div>
+                  
+                  {isAdmin && (
+                    <button 
+                      onClick={(e) => handleDeleteIntern(intern.id, e)}
+                      className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                      title="移除成员"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
-
-                {/* Delete button (Admin Only) */}
-                {isAdmin && (
-                  <button 
-                    onClick={(e) => handleDeleteIntern(intern.id, e)}
-                    title="删除成员"
-                    className="absolute right-2 top-8 opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded transition z-10"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                {isBottom && (
+                    <div className="absolute -right-1 -top-1">
+                         <span className="relative flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                        </span>
+                    </div>
                 )}
               </div>
             );
           })}
         </div>
 
-        {/* Admin Login Toggle */}
-        <div className="p-4 border-t border-white/5 flex justify-center">
-          {isAdmin ? (
+        <div className="p-4 border-t border-white/5">
+          {!isAdmin ? (
             <button 
-              onClick={() => setIsAdmin(false)} 
-              className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 opacity-50 hover:opacity-100 transition"
+              onClick={() => setIsAdminModalOpen(true)}
+              className="w-full py-3 rounded-xl border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800 transition flex items-center justify-center gap-2 text-sm font-bold"
             >
-              <LogOut size={12} /> 退出管理员
+              <Lock size={16} /> 管理员登录
             </button>
           ) : (
-            <button 
-              onClick={() => setIsAdminModalOpen(true)} 
-              className="text-xs text-slate-600 hover:text-slate-400 flex items-center gap-1 transition"
-            >
-              <Lock size={12} /> 管理员登录
-            </button>
+            <div className="flex gap-2">
+                <div className="flex-1 bg-indigo-900/30 border border-indigo-500/30 rounded-xl flex items-center justify-center text-indigo-300 text-xs font-bold">
+                    已获管理员权限
+                </div>
+                <button 
+                  onClick={() => setIsAdmin(false)}
+                  className="p-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+                  title="退出管理模式"
+                >
+                  <LogOut size={18} />
+                </button>
+            </div>
           )}
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto relative bg-slate-900">
-        {/* Decorative background blobs */}
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-            <div className="absolute top-[-10%] right-[-5%] w-96 h-96 bg-purple-600/20 rounded-full blur-3xl"></div>
-            <div className="absolute bottom-[10%] left-[10%] w-72 h-72 bg-blue-600/20 rounded-full blur-3xl"></div>
-        </div>
-
+      <main className="flex-1 relative overflow-y-auto h-screen scroll-smooth p-4 md:p-8 lg:p-12">
         {selectedIntern ? (
-          <div className="relative z-10 max-w-6xl mx-auto p-6 md:p-10">
+          <div className="max-w-5xl mx-auto space-y-8 pb-20">
             
             {/* Header Card */}
-            <div className="glass-panel rounded-3xl p-6 md:p-8 mb-8 flex flex-col md:flex-row justify-between items-center gap-6 shadow-xl relative group/header">
-              {isAdmin && (
-                  <button 
-                    onClick={() => setIsEditModalOpen(true)}
-                    className="absolute top-4 right-4 md:top-6 md:right-6 text-slate-400 hover:text-white hover:bg-white/10 p-2 rounded-full transition opacity-0 group-hover/header:opacity-100"
-                    title="编辑资料"
-                  >
-                    <Pencil size={18} />
-                  </button>
-              )}
-
-              <div className="flex items-center gap-6">
-                <div className="relative group">
-                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 rounded-full blur opacity-75 group-hover:opacity-100 transition duration-1000"></div>
-                    <img 
-                      src={getAvatarUrl(selectedIntern.avatarId)} 
-                      className="relative w-24 h-24 rounded-full border-4 border-white/20 bg-slate-100 shadow-2xl transform group-hover:scale-105 transition object-cover"
-                    />
-                    {isAdmin && (
-                      <button 
-                        onClick={handleRegenerateAvatar}
-                        title="随机切换形象/性别"
-                        className="absolute bottom-0 right-0 bg-slate-800 text-white p-1.5 rounded-full shadow border border-white/20 hover:bg-indigo-600 transition z-10"
-                      >
-                        <RefreshCw size={12} />
-                      </button>
-                    )}
+            <div className="bg-slate-800/40 backdrop-blur-md border border-white/5 rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-center md:items-start gap-6 md:gap-10 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+              
+              {/* Avatar Section */}
+              <div className="relative group shrink-0">
+                <div className="w-32 h-32 md:w-40 md:h-40 rounded-full p-1 bg-gradient-to-br from-indigo-500 to-purple-600 shadow-2xl">
+                  <img 
+                    src={getAvatarUrl(selectedIntern.avatarId)} 
+                    alt={selectedIntern.name}
+                    className="w-full h-full rounded-full bg-indigo-50" 
+                  />
                 </div>
-                <div>
-                  <h1 className="text-3xl md:text-4xl font-black text-white drop-shadow-sm flex items-center gap-3">
-                    {selectedIntern.name}
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                      selectedIntern.gender === 'male' 
-                        ? 'bg-blue-500/20 border-blue-500/40 text-blue-300' 
-                        : 'bg-pink-500/20 border-pink-500/40 text-pink-300'
-                    }`}>
-                      {selectedIntern.gender === 'male' ? '♂' : '♀'}
-                    </span>
-                  </h1>
-                  <div className="flex flex-wrap gap-3 mt-2">
-                    <span className="bg-indigo-500/20 text-indigo-200 px-3 py-1 rounded-full text-xs font-bold border border-indigo-500/30 flex items-center gap-1">
-                        <Users size={12} /> {selectedIntern.role}
-                    </span>
-                    <span className="bg-emerald-500/20 text-emerald-200 px-3 py-1 rounded-full text-xs font-bold border border-emerald-500/30 flex items-center gap-1">
-                        <Calendar size={12} /> 入职: {selectedIntern.joinDate}
-                    </span>
-                    <span className="bg-slate-700/50 text-slate-300 px-3 py-1 rounded-full text-xs font-bold border border-slate-600 flex items-center gap-1">
-                        📝 {selectedIntern.evaluations.length} 条评价
-                    </span>
+                <div className="absolute -bottom-2 -right-2 bg-slate-900 text-white text-xs font-bold px-3 py-1 rounded-full border border-slate-700 shadow-lg flex items-center gap-1">
+                  {selectedIntern.gender === 'female' ? '♀' : '♂'} {selectedIntern.role}
+                </div>
+                {isAdmin && (
+                  <div className="absolute top-0 right-0 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                        onClick={handleRegenerateAvatar}
+                        className="p-2 bg-slate-800 text-white rounded-full hover:bg-indigo-600 shadow-lg border border-white/10"
+                        title="更换/刷新头像"
+                    >
+                        <RefreshCw size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Info Section */}
+              <div className="flex-1 text-center md:text-left w-full">
+                <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
+                  <div>
+                    <h1 className="text-3xl md:text-4xl font-black text-white mb-2 tracking-tight flex items-center gap-3 justify-center md:justify-start">
+                      {selectedIntern.name}
+                      {isAdmin && (
+                        <button 
+                          onClick={() => setIsEditModalOpen(true)}
+                          className="text-slate-500 hover:text-indigo-400 transition"
+                        >
+                          <Pencil size={20} />
+                        </button>
+                      )}
+                    </h1>
+                    <div className="flex flex-wrap justify-center md:justify-start gap-3">
+                      <span className="px-3 py-1 rounded-lg bg-slate-700/50 text-slate-300 text-sm font-medium border border-white/5 flex items-center gap-1.5">
+                        <Calendar size={14} className="text-indigo-400"/> 入职: {selectedIntern.joinDate}
+                      </span>
+                      <span className="px-3 py-1 rounded-lg bg-slate-700/50 text-slate-300 text-sm font-medium border border-white/5 flex items-center gap-1.5">
+                        <Activity size={14} className="text-emerald-400"/> 收到评价: {selectedIntern.evaluations.length}
+                      </span>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setIsEvalModalOpen(true)}
+                    className="bg-white hover:bg-indigo-50 text-indigo-900 px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-500/10 transition transform hover:-translate-y-1 active:translate-y-0 flex items-center gap-2"
+                  >
+                    <Sparkles size={18} />
+                    写评价
+                  </button>
+                </div>
+
+                {/* AI Summary - Auto Generated */}
+                <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 rounded-2xl p-5 border border-indigo-500/20 relative group">
+                  <div className="flex items-center gap-2 mb-2 text-indigo-300 font-bold text-sm uppercase tracking-wider">
+                    <Zap size={16} className="fill-indigo-300" /> AI 综合画像
+                    {selectedIntern.aiSummary && (
+                        <button 
+                            onClick={handleForceGenerateSummary}
+                            disabled={isGeneratingAI}
+                            className="ml-auto p-1.5 text-indigo-400 hover:text-white hover:bg-indigo-500/20 rounded-lg transition disabled:opacity-50"
+                            title="重新生成评价"
+                        >
+                            <RefreshCw size={14} className={isGeneratingAI ? 'animate-spin' : ''} />
+                        </button>
+                    )}
+                  </div>
+                  <div className="text-indigo-100 leading-relaxed text-sm md:text-base min-h-[60px]">
+                    {isGeneratingAI ? (
+                      <div className="space-y-2 animate-pulse">
+                        <div className="h-4 bg-indigo-500/20 rounded w-3/4"></div>
+                        <div className="h-4 bg-indigo-500/20 rounded w-full"></div>
+                        <div className="h-4 bg-indigo-500/20 rounded w-5/6"></div>
+                      </div>
+                    ) : (
+                      selectedIntern.aiSummary || (
+                         <span className="text-indigo-400/60 italic">等待足够数据生成分析...</span>
+                      )
+                    )}
                   </div>
                 </div>
               </div>
-              <button 
-                onClick={() => setIsEvalModalOpen(true)}
-                className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white px-8 py-4 rounded-2xl font-bold shadow-lg shadow-indigo-500/30 transition transform hover:-translate-y-1 hover:shadow-xl flex items-center gap-2 min-w-[160px] justify-center"
-              >
-                <Zap size={20} fill="currentColor" /> 去打分
-              </button>
             </div>
 
-            {/* Dashboard Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Stats & History Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
               
-              {/* Radar Chart Card (Left - 5 cols) */}
-              <div className="lg:col-span-5 glass-panel rounded-3xl p-6 border border-white/10 shadow-lg flex flex-col">
-                <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                  <Activity size={20} className="text-indigo-400"/> 五维能力雷达
+              {/* Radar Chart */}
+              <div className="bg-slate-800/40 backdrop-blur-md border border-white/5 rounded-3xl p-6 flex flex-col">
+                <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                  <Activity className="text-indigo-400" /> 能力雷达
                 </h3>
-                <div className="flex-1 min-h-[300px] relative">
-                    {averageScores ? (
+                <div className="flex-1 flex items-center justify-center min-h-[300px]">
+                  {averageScores ? (
                     <StatsRadar averageScores={averageScores} />
-                    ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 font-medium">
-                        <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-3">
-                             <Activity className="opacity-30" size={32}/>
-                        </div>
-                        暂无数据，快去打分吧！
+                  ) : (
+                    <div className="text-slate-500 text-center py-12">
+                      <div className="text-4xl mb-4">📊</div>
+                      暂无评分数据
                     </div>
-                    )}
+                  )}
                 </div>
               </div>
 
-              {/* Right Column (7 cols) */}
-              <div className="lg:col-span-7 flex flex-col gap-6">
-                
-                {/* AI Card */}
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-1 border border-white/10 shadow-lg">
-                  <div className="bg-slate-900/50 rounded-[22px] p-6 h-full backdrop-blur-sm">
-                    <div className="flex justify-between items-start mb-4">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Sparkles size={18} className="text-yellow-400 fill-yellow-400" /> AI 综合评价
-                        </h3>
-                        <button 
-                        onClick={handleGenerateSummary}
-                        disabled={isGeneratingAI || !averageScores}
-                        className="text-xs bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/30 px-4 py-1.5 rounded-full transition disabled:opacity-50 font-bold"
-                        >
-                        {isGeneratingAI ? '正在分析...' : '生成分析报告'}
-                        </button>
-                    </div>
-                    
-                    <div className="text-sm text-slate-300 leading-relaxed bg-slate-950/30 p-4 rounded-xl border border-white/5 min-h-[100px]">
-                        {selectedIntern.aiSummary ? (
-                        <p className="animate-in fade-in slide-in-from-bottom-2 duration-500 whitespace-pre-wrap">{selectedIntern.aiSummary}</p>
-                        ) : (
-                        <p className="text-slate-500 italic text-center py-4">点击右上角按钮，AI 导师将根据五维数据生成犀利点评。</p>
-                        )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Recent Reviews List */}
-                <div className="glass-panel rounded-3xl p-6 border border-white/10 flex-1 flex flex-col min-h-[300px]">
-                  <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                    <Users size={18} className="text-emerald-400" /> 近期评价
-                  </h3>
-                  <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar flex-1">
-                    {selectedIntern.evaluations.length === 0 && (
-                      <div className="text-slate-500 text-sm text-center py-10">这里空空如也，快来给 TA 提点建议吧~</div>
-                    )}
-                    {selectedIntern.evaluations.map(ev => (
-                      <div key={ev.id} className="bg-white/5 hover:bg-white/10 transition p-4 rounded-2xl border border-white/5 relative group">
-                        <div className="flex justify-between items-center mb-3">
+              {/* History List */}
+              <div className="bg-slate-800/40 backdrop-blur-md border border-white/5 rounded-3xl p-6 flex flex-col h-[500px]">
+                <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                  <Users className="text-purple-400" /> 评价记录
+                </h3>
+                <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+                  {selectedIntern.evaluations.length > 0 ? (
+                    selectedIntern.evaluations.map(evaluation => (
+                      <div key={evaluation.id} className="bg-slate-700/30 border border-white/5 rounded-xl p-4 hover:bg-slate-700/50 transition group relative">
+                         {isAdmin && (
+                            <button 
+                                onClick={() => handleDeleteEvaluation(evaluation.id)}
+                                className="absolute top-3 right-3 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="删除评价"
+                            >
+                                <Trash2 size={14} />
+                            </button>
+                         )}
+                        <div className="flex justify-between items-start mb-2">
                           <div className="flex items-center gap-2">
-                             <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center text-[10px] font-bold text-white">
-                                {ev.raterName.charAt(0)}
-                             </div>
-                             <span className="font-bold text-indigo-200 text-sm">{ev.raterName}</span>
+                            <span className="font-bold text-indigo-300">{evaluation.raterName}</span>
+                            <span className="text-xs text-slate-500">{evaluation.date.split('T')[0]}</span>
                           </div>
-                          <span className="text-slate-500 text-xs font-medium bg-slate-900/50 px-2 py-1 rounded">{new Date(ev.date).toLocaleDateString('zh-CN')}</span>
+                          <div className="flex gap-1">
+                            {Object.entries(evaluation.scores).slice(0,3).map(([key, score]) => (
+                              <span key={key} className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                score >= 8 ? 'bg-green-500/20 text-green-400' : 'bg-slate-600 text-slate-300'
+                              }`}>
+                                {score}
+                              </span>
+                            ))}
+                            {Object.keys(evaluation.scores).length > 3 && <span className="text-[10px] text-slate-500 px-1">...</span>}
+                          </div>
                         </div>
-                        
-                        {/* Mini Score Bars */}
-                        <div className="grid grid-cols-5 gap-1 mb-3 opacity-80">
-                           {(Object.entries(ev.scores) as [string, number][]).map(([key, score]) => (
-                              <div key={key} className="flex flex-col gap-1 group/bar">
-                                <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                    <div 
-                                        className={`h-full rounded-full ${score >= 8 ? 'bg-emerald-400' : score <= 4 ? 'bg-rose-400' : 'bg-amber-400'}`} 
-                                        style={{ width: `${score*10}%` }}
-                                    ></div>
-                                </div>
-                              </div>
-                           ))}
-                        </div>
-
-                        <p className="text-slate-300 text-sm bg-black/20 p-3 rounded-xl italic">
-                            "{ev.comment || "暂无评论"}"
-                        </p>
-
-                        {/* Admin: Delete Evaluation */}
-                        {isAdmin && (
-                          <button 
-                            onClick={() => handleDeleteEvaluation(ev.id)}
-                            title="删除评价"
-                            className="absolute top-2 right-2 p-1.5 bg-slate-800/80 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded-lg opacity-0 group-hover:opacity-100 transition"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                        {evaluation.comment && (
+                          <p className="text-slate-300 text-sm leading-relaxed">"{evaluation.comment}"</p>
                         )}
                       </div>
-                    ))}
-                  </div>
+                    ))
+                  ) : (
+                    <div className="text-center text-slate-500 py-10">
+                      <p>还没有人评价过 TA 呢 ~</p>
+                      <button 
+                        onClick={() => setIsEvalModalOpen(true)}
+                        className="mt-4 text-indigo-400 text-sm hover:underline"
+                      >
+                        抢沙发
+                      </button>
+                    </div>
+                  )}
                 </div>
-
               </div>
             </div>
-
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-slate-500 relative z-10">
-            <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-6 animate-pulse">
-                <Users size={48} className="opacity-50" />
-            </div>
-            <p className="text-lg font-medium">请在左侧选择一名实习生查看详情</p>
+          <div className="h-full flex flex-col items-center justify-center text-slate-500">
+            <div className="text-6xl mb-4 opacity-50">👋</div>
+            <p className="text-xl">请选择一位实习生查看详情</p>
           </div>
         )}
       </main>
@@ -520,21 +573,21 @@ export default function App() {
       {/* Modals */}
       {selectedIntern && (
         <>
-            <EvaluationModal 
+          <EvaluationModal 
             isOpen={isEvalModalOpen} 
             onClose={() => setIsEvalModalOpen(false)} 
             onSubmit={handleAddEvaluation}
             internName={selectedIntern.name}
-            />
-            <EditInternModal 
+          />
+          <EditInternModal 
             isOpen={isEditModalOpen}
             onClose={() => setIsEditModalOpen(false)}
             initialData={selectedIntern}
             onSubmit={handleUpdateIntern}
-            />
+          />
         </>
       )}
-
+      
       <AdminLoginModal 
         isOpen={isAdminModalOpen} 
         onClose={() => setIsAdminModalOpen(false)} 
@@ -546,7 +599,6 @@ export default function App() {
         onClose={() => setIsAddModalOpen(false)} 
         onSubmit={handleAddIntern} 
       />
-
     </div>
   );
 }
