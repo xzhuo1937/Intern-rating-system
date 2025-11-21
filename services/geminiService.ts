@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { Intern, CRITERIA_LABELS, CriteriaKey } from "../types";
 
-const apiKey = process.env.API_KEY || '';
+const apiKey = import.meta.env.VITE_API_KEY || process.env.API_KEY || '';
 
 export const generateInternSummary = async (intern: Intern): Promise<string> => {
   if (!apiKey) {
