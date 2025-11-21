@@ -1,13 +1,12 @@
-import { GoogleGenAI } from "@google/genai";  // ← 用你原来的包
+import { GoogleGenAI } from "@google/genai";
 import { Intern, CRITERIA_LABELS, CriteriaKey } from "../types";
 
-const apiKey = import.meta.env.VITE_API_KEY || '';  // ← 只用这一行！！
-
-console.log('【调试】当前 apiKey 是否有值：', apiKey ? 'YES（长度'+apiKey.length+'）' : 'NO → 请检查 Vercel VITE_API_KEY');
+// 正确读取方式（Vercel + Vite 标准）
+const apiKey = import.meta.env.VITE_API_KEY || "";
 
 export const generateInternSummary = async (intern: Intern): Promise<string> => {
   if (!apiKey) {
-    return "未检测到 API Key，无法生成评价（检查 Vercel 是否设置了 VITE_API_KEY）";
+    return "未检测到 API Key（请检查 Vercel 是否设置了 VITE_API_KEY）";
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -41,12 +40,12 @@ export const generateInternSummary = async (intern: Intern): Promise<string> => 
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',  // 改成稳定版本
+      model: 'gemini-1.5-flash',
       contents: prompt,
     });
-    return response.text || "生成为空";
+    return response.text || "生成内容为空";
   } catch (error: any) {
-    console.error("Gemini Error:", error);
-    return `生成失败：${error.message}`;
+    console.error("Gemini API Error:", error);
+    return `生成失败：${error.message || "未知错误"}`;
   }
 };
